@@ -14,6 +14,7 @@
 #include <iostream>
 
 #include <unistd.h>
+#include <assert.h>
 
 //线程相关
 #include <pthread.h>

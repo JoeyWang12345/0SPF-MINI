@@ -12,7 +12,8 @@
 #include <arpa/inet.h>
 
 enum struct NeighborState : uint8_t {
-    DOWN = 1,
+    //WOC
+    DOWN = 0,
     ATTEMPT,
     INIT,
     TWO_WAY,
@@ -67,7 +68,7 @@ public:
     //事件触发回调方法
     void receiveHelloEvent();
     void receive1WayEvent();
-    void receive2WayEvent();
+    void receive2WayEvent(Interface* Interface);
     void negotiationDoneEvent();
     void seqNumberMismatchEvent();
     void exchangeDoneEvent();

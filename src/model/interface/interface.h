@@ -22,7 +22,7 @@ enum struct NetworkType : uint8_t {
 
 //接口状态机
 enum struct InterfaceState : uint8_t {
-    DOWN = 1,
+    DOWN = 0,
     LOOPBACK,
     WAITING,
     PTP,
@@ -35,6 +35,8 @@ class Interface {
 public:
     NetworkType networkType = NetworkType::BROADCAST;
     InterfaceState interfaceState = InterfaceState::DOWN;
+    //接口名称
+    const char* interface_name;
     //in_addr_t就是uint32_t
     in_addr_t ip;
     uint32_t network_mask = 0xffffff00;
@@ -52,7 +54,8 @@ public:
     Retransmitter rxmtter = Retransmitter(this);
     
     //默认值
-    uint32_t cost = 1;
+    // uint32_t cost = 1;
+    uint32_t cost;
     uint32_t mtu = 1500;
 
     uint32_t designed_router = 0;

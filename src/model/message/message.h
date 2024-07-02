@@ -177,6 +177,10 @@ struct LSARouterLink {
 
     LSARouterLink();
     LSARouterLink(char* lsa_link);
+    
+    //比较两实例是否相等
+    bool operator==(const LSARouterLink& other);
+    void print();
 };
 
 struct LSA {
@@ -203,11 +207,13 @@ struct LSARouter : public LSA {
     LSARouter(char* lsu_lsa_pos);
     char* toRouterLSA();
     size_t size() override;
+    void print();
+    bool operator==(const LSARouter& other);
 };
 
 struct LSANetwork : public LSA {
     //网络mask(ABC类网络)
-    uint32_t network_mask;
+    uint32_t network_mask = 0xffffff00;
     //接入该网络的各个路由器的标识
     std::vector<uint32_t> attached_routers;
 
@@ -215,6 +221,8 @@ struct LSANetwork : public LSA {
     LSANetwork(char* lsu_lsa_pos);
     char* toNetworkLSA();
     size_t size() override;
+    void print();
+    bool operator==(const LSANetwork& other);
 };
 
 #endif //WHY_OSPF_MESSAGE_H

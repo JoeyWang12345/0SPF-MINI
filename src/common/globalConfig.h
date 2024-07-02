@@ -12,7 +12,7 @@
 #define WHY_OSPF_GLOBALCONFIG_H
 
 namespace WHYConfig {
-    extern const char* local_name;
+    // extern const char* local_name;
     extern uint32_t router_id;
     extern std::vector<Interface*> interfaces;
     extern std::map<uint32_t, Interface*> iptointerface;

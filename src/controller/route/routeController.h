@@ -18,9 +18,10 @@ struct RoutingTableItem {
     uint8_t type;//路由类型
     uint32_t metric;//路由成本
     uint32_t next_hop;//下一跳IP
+    Interface* out_interface;//出接口
 
     RoutingTableItem();
-    RoutingTableItem(uint32_t destination, uint32_t next_hop, uint32_t metric);
+    RoutingTableItem(uint32_t destination, uint32_t next_hop, uint32_t metric, Interface* out_interface);
     void print();
 };
 
@@ -31,6 +32,7 @@ struct Edge {
 
     Edge();
     Edge(uint32_t source_ip, uint32_t metric, uint32_t target_id);
+    void print();
 };
 
 //顶点和与之相邻的边
@@ -52,6 +54,7 @@ struct toTargetVertex {
 
     toTargetVertex();
     toTargetVertex(uint32_t target_vertex_id, uint32_t total_metric);
+    toTargetVertex(uint32_t target_vertex_id, uint32_t total_metric, uint32_t next_hop, Interface* interface);   
     void print();
 };
 

@@ -5,6 +5,8 @@
 #include "routeController.h"
 #include "../../model/LSDB/LSDB.h"
 
+// #define INFINITY (0x7fffffff)
+
 //
 // RoutingTableItem
 //
@@ -12,12 +14,13 @@ RoutingTableItem::RoutingTableItem() {
 
 }
 
-RoutingTableItem::RoutingTableItem(uint32_t destination, uint32_t next_hop, uint32_t metric) {
+RoutingTableItem::RoutingTableItem(uint32_t destination, uint32_t next_hop, uint32_t metric, Interface* out_interface) {
     this->destination = destination;
     this->address_mask = 0xffffff00;
     this->type = 1;
     this->metric = metric;
     this->next_hop = next_hop;
+    this->out_interface = out_interface;
 }
 
 void RoutingTableItem::print() {
@@ -26,6 +29,8 @@ void RoutingTableItem::print() {
     ip_addr.s_addr = htonl(address_mask);
     printf("| %-15s ", inet_ntoa(ip_addr));
     ip_addr.s_addr = htonl(next_hop);
+    printf("| %-15s ", inet_ntoa(ip_addr));
+    ip_addr.s_addr = htonl(out_interface->ip);
     printf("| %-15s ", inet_ntoa(ip_addr));
     printf("|   %02d   | \n", metric);
 }
@@ -43,6 +48,10 @@ Edge::Edge(uint32_t source_ip, uint32_t metric, uint32_t target_id) {
     this->target_id = target_id;
 }
 
+void Edge::print() {
+
+}
+
 //
 //  Vertex
 //
@@ -54,6 +63,7 @@ Vertex::Vertex(uint32_t router_id) {
     this->router_id = router_id;
 }
 
+//打印从本路由器视角看到的
 void Vertex::print() {
     ip_addr.s_addr = htonl(router_id);
     printf("Vertex: [%-15s]\n", inet_ntoa(ip_addr));
@@ -78,10 +88,25 @@ toTargetVertex::toTargetVertex(uint32_t target_vertex_id, uint32_t total_metric)
     this->total_metric = total_metric;
 }
 
+toTargetVertex::toTargetVertex(uint32_t target_vertex_id, uint32_t total_metric, uint32_t next_hop, Interface* interface) {
+    this->target_vertex_id = target_vertex_id;
+    this->total_metric = total_metric;
+    this->next_hop = next_hop;
+    this->out_interface = interface;
+}
+
 void toTargetVertex::print() {
     ip_addr.s_addr = htonl(target_vertex_id);
     printf("to [%-15s]: %02d ", inet_ntoa(ip_addr), total_metric);
     ip_addr.s_addr = htonl(next_hop);
+    printf("%-15s ", inet_ntoa(ip_addr));
+    //出接口的IP地址
+    if (out_interface == nullptr) {
+        ip_addr.s_addr = htonl(0);
+        printf("%-15s\n", inet_ntoa(ip_addr));
+        return;
+    }
+    ip_addr.s_addr = htonl(out_interface->ip);
     printf("%-15s\n", inet_ntoa(ip_addr));
 }
 
@@ -104,20 +129,26 @@ RoutingTable::~RoutingTable() {
 }
 
 void RoutingTable::buildTopo() {
+    printf("Building topo.\n");
     //首先清空现有的拓扑
     vertexes.clear();
 
     pthread_mutex_lock(&lsdb.router_lock);
     pthread_mutex_lock(&lsdb.network_lock);
-    //暂存当前的LSDB
-    LSDB lsdb_copy = lsdb;
+    //复制当前的LSDB
+    // LSDB lsdb_copy = lsdb;
+    LSDB lsdb_copy = lsdb.deepClone();
     pthread_mutex_unlock(&lsdb.network_lock);
     pthread_mutex_unlock(&lsdb.router_lock);
+
+    //TEST
+    printf("LSARouter's num: %d.\n", lsdb.lsa_routers.size());
 
     //遍历所有的lsa_router
     for (LSARouter* lsa_router : lsdb_copy.lsa_routers) {
         //找到LSA的始发路由器标识，初始化顶点
         uint32_t source_id = lsa_router->lsaHeader.advertising_router;
+        printf("Source id is: %x.\n", source_id);
         if (vertexes.find(source_id) == vertexes.end()) {
             vertexes[source_id] = Vertex(source_id);
         }
@@ -145,6 +176,7 @@ void RoutingTable::buildTopo() {
                 vertexes[source_id].adjacencies[target_id] = Edge(source_ip, metric, target_id);
             }
             else {
+                //STUB网络不需要
                 continue;
             }
         }
@@ -153,6 +185,7 @@ void RoutingTable::buildTopo() {
 
 //根据拓扑信息计算路由
 void RoutingTable::calRouting() {
+    printf("Calculating routing.\n");
     //判断拓扑是否为空
     if (vertexes.empty()) {
         printf("run buildTopo first to get topo.\n");
@@ -169,43 +202,60 @@ void RoutingTable::calRouting() {
         }
     }
     //初始化：将本路由器加入paths并将其初始开销设为0
-    paths[WHYConfig::router_id] = toTargetVertex(WHYConfig::router_id, 0);
+    paths[WHYConfig::router_id] = toTargetVertex(WHYConfig::router_id, 0, 0, nullptr);
+    //TEST 打印
+    // for (auto& elem : paths) {
+    //     elem.second.print();
+    // }
+    //占用一块内存，下面每次用指针指向该内存(只读)
+    toTargetVertex tmp(0, INFINITY);
 
     //run dijkstra
     uint32_t now_id = WHYConfig::router_id;
+    //当前的结点(随循环更新并放入paths)
+    Vertex* now_vertex = nullptr;
+    toTargetVertex* now_toTargetVertex = nullptr;
+    //和当前节点相邻的节点(最短路被更新)
+    Vertex* other_vertex = nullptr;
+    Edge* edge = nullptr;
+    toTargetVertex* to_other_vertex = nullptr;
     while (pending_vertexes.size() != 0) {
+        // printf("pending_vertexes's size: %d.\n", pending_vertexes.size());
+        // for (auto& elem : paths) {
+        //     elem.second.print();
+        // }
         //当前顶点
-        Vertex now_vertex = vertexes[now_id];
-        toTargetVertex now_toTargetVertex = paths[now_id];
-        if (now_vertex.adjacencies.size() == 0) {
+        now_vertex = &vertexes[now_id];
+        now_toTargetVertex = &paths[now_id];
+        if (now_vertex->adjacencies.size() == 0) {
             break;
         }
         //遍历当前顶点的相邻顶点和边
-        for (auto& elem : now_vertex.adjacencies) {
+        for (auto& elem : now_vertex->adjacencies) {
             //相邻顶点
-            Vertex other_vertex = vertexes[elem.first];
+            other_vertex = &vertexes[elem.first];
             //两者之间的边
-            Edge edge = elem.second;
+            edge = &elem.second;
             //检查临接点是否已被操作
-            if (pending_vertexes.find(edge.target_id) == pending_vertexes.end()) {
+            if (pending_vertexes.find(edge->target_id) == pending_vertexes.end()) {
                 continue;
             }
             //松弛(比较pending中的最短距离和当前路径)
-            toTargetVertex temp = pending_vertexes[edge.target_id];
-            if (temp.total_metric > now_toTargetVertex.total_metric + edge.metric) {
-                temp.total_metric = now_toTargetVertex.total_metric + edge.metric;
+            to_other_vertex = &pending_vertexes[edge->target_id];
+            if (to_other_vertex->total_metric > now_toTargetVertex->total_metric + edge->metric) {
+                to_other_vertex->total_metric = now_toTargetVertex->total_metric + edge->metric;
                 //更新下一跳，根据是否为本路由器讨论
                 if (now_id == WHYConfig::router_id) {
-                    temp.next_hop = other_vertex.adjacencies[now_id].source_ip;
-                    temp.out_interface = WHYConfig::iptointerface[edge.source_ip];
+                    to_other_vertex->next_hop = other_vertex->adjacencies[now_id].source_ip;
+                    to_other_vertex->out_interface = WHYConfig::iptointerface[edge->source_ip];
                 }
                 else {
-                    temp.next_hop = now_toTargetVertex.next_hop;
-                    temp.out_interface = now_toTargetVertex.out_interface;
+                    to_other_vertex->next_hop = now_toTargetVertex->next_hop;
+                    to_other_vertex->out_interface = now_toTargetVertex->out_interface;
                 }
             }
         }
-        //找到当前距离最短的顶点
+        //找到当前距离最短的顶点(加入paths)
         toTargetVertex min_toTargetVertex = toTargetVertex(0, INFINITY);
         for (auto& elem : pending_vertexes) {
             if (elem.second.total_metric < min_toTargetVertex.total_metric) {
@@ -221,6 +271,7 @@ void RoutingTable::calRouting() {
 
 //根据网络拓扑和计算结果生成路由表
 void RoutingTable::generateRouting() {
+    printf("Gererating Routing Table.\n");
     routings.clear();
     //当前路由器不需要为自己生成路由
     for (auto& elem : paths) {
@@ -237,13 +288,13 @@ void RoutingTable::generateRouting() {
             uint32_t dest_ip = edge.source_ip & 0xffffff00;
             //如果路由表中没有目标网络，直接插入
             if (routings.find(dest_ip) == routings.end()) {
-                routings[dest_ip] = RoutingTableItem(dest_ip, toVertex.next_hop, toVertex.total_metric);
+                routings[dest_ip] = RoutingTableItem(dest_ip, toVertex.next_hop, toVertex.total_metric, toVertex.out_interface);
             }
             else {
                 //有目标网络，维护较小值
                 RoutingTableItem route_item = routings[dest_ip];
                 if (route_item.metric > toVertex.total_metric) {
-                    routings[dest_ip] = RoutingTableItem(dest_ip, toVertex.next_hop, toVertex.total_metric);
+                    routings[dest_ip] = RoutingTableItem(dest_ip, toVertex.next_hop, toVertex.total_metric, toVertex.out_interface);
                 }
             }
         }
@@ -268,7 +319,7 @@ void RoutingTable::printPaths() {
 
 void RoutingTable::printRoutingTable() {
     printf("============Table Information============\n");
-    printf("| dest_ip | net_mask | next_hop | metric |\n");
+    printf("|  dest_ip  |  net_mask  |  next_hop  |  out_interface  |  metric  |\n");
     for (auto& elem : routings) {
         elem.second.print();
     }
@@ -295,13 +346,20 @@ void RoutingTable::update() {
 }
 
 void RoutingTable::resetRoute() {
-    //不知道这样写会不会出错
+    printf("rtentries's size: %d.\n", rtentries.size());
+    int temp;
+    //遍历存储在rtentries容器中的路由条目
     for (auto& route : rtentries) {
-        if (ioctl(router_fd, SIOCDELRT, &route) < 0) {
+        //调用ioctl函数删除路由条目，小于0表示删除失败
+        temp = ioctl(router_fd, SIOCDELRT, &route);
+        if (temp < 0) {
+            //打印失败信息
             struct sockaddr_in dest = *((struct sockaddr_in*)&route.rt_dst);
             printf("Deleted route %s.\n", inet_ntoa(dest.sin_addr));
-            perror(":");
+            //输出详细的错误信息
+            perror(": ");
         }
+        printf("Delete route item successfully.\n");
     }
     rtentries.clear();
     printf("Successfully reset kernel route.\n");
@@ -312,6 +370,7 @@ void RoutingTable::writeKernelRoute() {
     resetRoute();
 
     //循环遍历路由条目
+    int temp;
     for (auto& elem : routings) {
         RoutingTableItem item = elem.second;
         //定义并初始化
@@ -333,7 +392,8 @@ void RoutingTable::writeKernelRoute() {
         //复制rtentry
         struct rtentry copy = rtentry;
         //添加路由条目
-        if (ioctl(router_fd, SIOCADDRT, &rtentry) < 0) {
+        if ((temp = ioctl(router_fd, SIOCADDRT, &rtentry)) < 0) {
+            //这里一直写不进去，说文件已经存在
             perror("Failed to add route");
         }
         else {
@@ -341,5 +401,6 @@ void RoutingTable::writeKernelRoute() {
             rtentries.push_back(copy);
         }
     }
+    printf("rtentries's size: %d.\n", rtentries.size());
     printf("Successfully wrote kernel route.\n");
 }   

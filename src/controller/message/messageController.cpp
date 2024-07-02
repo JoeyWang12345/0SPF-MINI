@@ -46,7 +46,7 @@ void* sendHelloPacket(void* itf) {
     //将套接字绑定到特定的网络接口
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    strcpy(ifr.ifr_name, WHYConfig::local_name);
+    strcpy(ifr.ifr_name, intf->interface_name);
     if (setsockopt(socket_fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr)) < 0) {
         perror("setsockopt SO_BINDTODEVICE failed");
     }
@@ -128,7 +128,7 @@ void sendPacket(const char* data, size_t length, uint8_t type, uint32_t target_i
     //将套接字绑定到特定的网络接口
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    strcpy(ifr.ifr_name, WHYConfig::local_name);
+    strcpy(ifr.ifr_name, interface->interface_name);
     if (setsockopt(socket_fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr)) < 0) {
         perror("setsockopt SO_BINDTODEVICE failed");
     }
@@ -183,13 +183,14 @@ void* receivePacket(void* itf) {
     //将套接字绑定到特定的网络接口
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    strcpy(ifr.ifr_name, WHYConfig::local_name);
+    strcpy(ifr.ifr_name, intf->interface_name);
     if (setsockopt(socket_fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr) < 0)) {
         perror("Receive setsockopt SO_BINDTODEVICE failed");
     }
 
     //打印提示
-    printf("Receive Packet has init.\n");
+    // printf("Receive Packet has init.\n");
+    // printf("Interface's name: %s.\n", intf->interface_name);
     
     //循环接收网络数据包并处理
     struct iphdr* ip_header;//IP头部信息
@@ -215,22 +216,25 @@ void* receivePacket(void* itf) {
         //检查IP数据包头部
         ip_header = (struct iphdr*)packet_receive;
         //若不是OSPF协议
-        printf("%d\n", ip_header->protocol);
+        // printf("%d\n", ip_header->protocol);
         if (ip_header->protocol != 89) {
-            printf("Not OSPF protocol.\n");
+            // printf("Not OSPF protocol.\n");
             continue;
         }
 
         //检查地址是否合法
         in_addr_t source_ip = ntohl(*(uint32_t*)(packet_receive + IP_HEADER_SOURCE_IP));
         in_addr_t target_ip = ntohl(*(uint32_t*)(packet_receive + IP_HEADER_TARGET_IP));
-        if ((target_ip != intf->ip && target_ip != ntohl(inet_addr("224.0.0.5"))) || (source_ip == intf->ip)) {
+        //这的逻辑加一条:目标地址为多播需判断源是否处于同一网段
+        if ((target_ip != intf->ip && target_ip != ntohl(inet_addr("224.0.0.5")))
+         || (source_ip == intf->ip) || 
+         (target_ip == ntohl(inet_addr("224.0.0.5")) && ((source_ip & 0xffffff00) != (intf->ip & 0xffffff00)))) {
             printf("Invalid address, continue.\n");
             continue;
         }
 
         //TEST 打印测试
-        printf("Receive one packet.\n");
+        // printf("Receive one packet.\n");
         source.s_addr = htonl(source_ip);
         printf("source: %s, ", inet_ntoa(source));
         target.s_addr = htonl(target_ip);
@@ -246,27 +250,31 @@ void* receivePacket(void* itf) {
         //核心处理逻辑
         if (header->type == HELLO) {
             printf("Receive Hello packet.\n");
+            printf("Interface's name: %s.\n", intf->interface_name);
             receiveHelloPacket(packet_receive, source_ip, intf, header);
-            printf("ReceiveHellopacket finished.\n");
+            // printf("ReceiveHellopacket finished.\n");
         }
         else if (header->type == DD) {
             printf("Receive DD packet.\n");
+            printf("Interface's name: %s.\n", intf->interface_name);
             receiveDDPacket(packet_receive, source_ip, intf, header);
-            printf("ReceiveDDpacket finished.\n");
+            // printf("ReceiveDDpacket finished.\n");
         }
         else if (header->type == LSR) {
             printf("Receive LSR packet.\n");
+            printf("Interface's name: %s.\n", intf->interface_name);
             receiveLSRPacket(packet_receive, source_ip, intf, header);
-            printf("ReceiveLSRpacket finished.\n");
+            // printf("ReceiveLSRpacket finished.\n");
         }
         else if (header->type == LSU) {
             printf("Receive LSU packet.\n");
+            printf("Interface's name: %s.\n", intf->interface_name);
             receiveLSUPacket(packet_receive, source_ip, target_ip, intf);
-            printf("ReceiveLSUpacket finished.\n");
+            // printf("ReceiveLSUpacket finished.\n");
         }
-        printf("Next circle.\n");
+        // printf("Next circle.\n");
     }
-    printf("Receive packet finished.\n");
+    // printf("Receive packet finished.\n");
 
     //释放空间
     free(packet_receive);
@@ -278,6 +286,7 @@ void receiveHelloPacket(char* packet_receive, in_addr_t source_ip, Interface* in
     //从接口的邻居列表中获取源IP地址对应的邻居
     Neighbor* neighbor;
     if ((neighbor = intf->getNeighbor(source_ip)) == nullptr) {
+        printf("Doesn't have neighbor: %x, add it into list.\n", source_ip);
         //若为空则加入列表
         neighbor = intf->addNeighbor(source_ip);
     }
@@ -292,7 +301,15 @@ void receiveHelloPacket(char* packet_receive, in_addr_t source_ip, Interface* in
 
     //处理Hello报文接收事件
     neighbor->receiveHelloEvent();
-    printf("ReceiveHelloEvent finished.\n");
+    // printf("ReceiveHelloEvent finished.\n");
+
+    //TEST
+    printf("neighbor's prev_dr: %x.\n", prev_neighbor_dr);
+    printf("neighbor's prev_bdr: %x.\n", prev_neighbor_bdr);
+    printf("neighbor's dr: %x.\n", neighbor->designed_router);
+    printf("neighbor's bdr: %x.\n", neighbor->backup_designed_router);
+    printf("neighbor's ip: %x.\n", neighbor->ip);
+    printf("neighbor's id: %x.\n", neighbor->id);
 
     //检查Hello报文中是否包含本路由器的ID以确定邻居关系是否为2-Way状态
     uint32_t* neighbor_attach = (uint32_t*)(packet_receive + IP_HEADER_LEN + OSPF_HELLO_LEN);
@@ -301,7 +318,7 @@ void receiveHelloPacket(char* packet_receive, in_addr_t source_ip, Interface* in
     while (neighbor_attach != end) {
         if (*neighbor_attach == htonl(WHYConfig::router_id)) {
             is2Way = true;
-            neighbor->receive2WayEvent();
+            neighbor->receive2WayEvent(intf);
             break;
         }
         neighbor_attach++;
@@ -309,42 +326,36 @@ void receiveHelloPacket(char* packet_receive, in_addr_t source_ip, Interface* in
     if (!is2Way) {
         neighbor->receive1WayEvent();
         //可以结束方法
+        //TEST
         return;
     }
-
-    //TEST
-    printf("neighbor's prev_dr: %x.\n", prev_neighbor_dr);
-    printf("neighbor's prev_bdr: %x.\n", prev_neighbor_bdr);
-    printf("neighbor's dr: %x.\n", neighbor->designed_router);
-    printf("neighbor's bdr: %x.\n", neighbor->backup_designed_router);
-    printf("neighbor's ip: %x.\n", neighbor->ip);
 
     //检查DR的变化情况
     if (neighbor->designed_router == neighbor->ip && neighbor->backup_designed_router == 0
     && intf->interfaceState == InterfaceState::WAITING) {
         //TODO 这里的方法不返回
-        printf("DR's BackupSeenEvent started.\n");
+        // printf("DR's BackupSeenEvent started.\n");
         intf->backupSeenEvent();
-        printf("DR's BackupSeenEvent finished.\n");
+        // printf("DR's BackupSeenEvent finished.\n");
     }
     else if ((prev_neighbor_dr == neighbor->ip) ^ (neighbor->designed_router == neighbor->ip)) {
         //如果neighbor所宣称的DR发生了变化
-        printf("DR's NeighborChangeEvent started.\n");
+        // printf("DR's NeighborChangeEvent started.\n");
         intf->neighborChangeEvent();
-        printf("DR's NeighborChangeEvent finished.\n");
+        // printf("DR's NeighborChangeEvent finished.\n");
     }
 
     //检查BDR的变化情况
     if (neighbor->backup_designed_router == neighbor->ip
     && intf->interfaceState == InterfaceState::WAITING) {
-        printf("BDR's BackupSeenEvent started.\n");
+        // printf("BDR's BackupSeenEvent started.\n");
         intf->backupSeenEvent();
-        printf("BDR's BackupSeenEvent finished.\n");
+        // printf("BDR's BackupSeenEvent finished.\n");
     }
     else if ((prev_neighbor_bdr == neighbor->ip) ^ (neighbor->backup_designed_router == neighbor->ip)) {
-        printf("BDR's NeighborChangeEvent started.\n");
+        // printf("BDR's NeighborChangeEvent started.\n");
         intf->neighborChangeEvent();
-        printf("BDR's NeighborChangeEvent finished.\n");
+        // printf("BDR's NeighborChangeEvent finished.\n");
     }
 }
 
@@ -377,7 +388,7 @@ void receiveDDPacket(char* packet_receive, in_addr_t source_ip, Interface* intf,
     switch (neighbor->neighborState) {
         case NeighborState::INIT: {
             //将建立2WAY或EXSTART关系
-            neighbor->receive2WayEvent();
+            neighbor->receive2WayEvent(intf);
             goto start_switch;
             break;
         }
@@ -427,7 +438,7 @@ void receiveDDPacket(char* packet_receive, in_addr_t source_ip, Interface* intf,
                 return;
             }
             //检查报文一致性
-            if ((neighbor->is_master ^ dd->b_MS) || dd->b_I) {
+            if ((neighbor->is_master ^ dd->b_MS)) {
                 printf("DD packet mismatched: b_I or b_MS not fit negotiation result.\n");
                 neighbor->seqNumberMismatchEvent();
                 return;
@@ -436,6 +447,7 @@ void receiveDDPacket(char* packet_receive, in_addr_t source_ip, Interface* intf,
             //这彻底没问题了，dd_seq_num表示上一次给邻居发的DD报文的序号
             if ((neighbor->is_master && sequence_number == neighbor->dd_seq_num + 1)
             || (!neighbor->is_master && sequence_number == neighbor->dd_seq_num)) {
+                //accepted表示收到的DD是携带LSA header的
                 printf("DD packet was accepted.\n");
                 is_accepted = true;
             }
@@ -458,7 +470,7 @@ void receiveDDPacket(char* packet_receive, in_addr_t source_ip, Interface* intf,
                 }
                 return;
             }
-            if ((neighbor->is_master ^ dd->b_MS) || dd->b_I) {
+            if ((neighbor->is_master ^ dd->b_MS)) {
                 printf("DD packet mismatched: b_I or b_MS not fit negotiation result.\n");
                 neighbor->seqNumberMismatchEvent();
                 return;
@@ -476,6 +488,13 @@ void receiveDDPacket(char* packet_receive, in_addr_t source_ip, Interface* intf,
         LSAHeader* receive_lsa_pos = (LSAHeader*)(packet_receive + IP_HEADER_LEN + OSPF_HEADER_LEN + OSPF_DD_LEN);
         LSAHeader* receive_lsa_end = (LSAHeader*)(packet_receive + IP_HEADER_LEN + header->packet_length);
 
+        bool is_empty_dd = false;
+        //TESST 特判是不是空DD报文
+        if (receive_lsa_end == receive_lsa_pos) {
+            is_empty_dd = true;
+        }
+
+        //计算需要从邻居获取的LSA并放入lsr_list
         while (receive_lsa_pos != receive_lsa_end) {
             LSAHeader lsa_header;
             //发布LSA的路由器
@@ -507,7 +526,7 @@ void receiveDDPacket(char* packet_receive, in_addr_t source_ip, Interface* intf,
         printf("Num of LSR: : %d.\n", neighbor->lsr_list.size());
 
         //对收到的DD报文进行应答
-        printf("start replying to DD packet.\n");
+        // printf("start replying to DD packet.\n");
         char* reply_data = (char*)malloc(1024);
         int reply_len = 0;
 
@@ -526,9 +545,22 @@ void receiveDDPacket(char* packet_receive, in_addr_t source_ip, Interface* intf,
 
         //根据主从关系讨论(本地为从机)
         if (neighbor->is_master) {
-            //本机接口是slave，设置应答报文序列号
-            neighbor->dd_seq_num = sequence_number;
-            DD_ack->sequence_number = htonl(sequence_number);
+            //TEST 特判
+            if (!is_empty_dd) {
+                neighbor->dd_seq_num = sequence_number;
+                printf("DD_ack's seq_num: %d.\n", sequence_number);
+                DD_ack->sequence_number = htonl(sequence_number);
+            }
+            else {
+                printf("DD_ack's seq_num: %d.\n", neighbor->dd_seq_num); 
+                DD_ack->sequence_number = htonl(neighbor->dd_seq_num);
+            }
+
+            //本机接口是slave(不能这样设置，本地是slave，只要重复master的seq_num)
+            // neighbor->dd_seq_num = sequence_number;
+            // printf("neighbor's dd_seq_num: %d.\n", neighbor->dd_seq_num);
+            // DD_ack->sequence_number = htonl(sequence_number);
+            // DD_ack->sequence_number = htonl(neighbor->dd_seq_num);
 
             //添加LSA头部到应答报文中
             LSAHeader* lsa_header = (LSAHeader*)(reply_data + sizeof(OSPFDD));
@@ -599,11 +631,12 @@ void receiveDDPacket(char* packet_receive, in_addr_t source_ip, Interface* intf,
                 memcpy(lsa_header_pos, &lsa_h, LSA_HEADER_LEN);
 
                 //TEST
-                lsa_h.print();
+                lsa_h.print();  
                 
                 lsa_header_pos++;
                 lsa_count++;
                 reply_len += LSA_HEADER_LEN;
+                //向邻居发送本地LSDB的内容，同时从db_summary_list中删除
                 neighbor->db_summary_list.pop_front();
             }
             //设置b_M位
@@ -613,9 +646,7 @@ void receiveDDPacket(char* packet_receive, in_addr_t source_ip, Interface* intf,
             else {
                 DD_ack->b_M = 1;
             }
-            //TEST 这里改没有用
-            DD_ack->b_I = 0;
-            DD_ack->b_MS = 1;
+
             //发送报文
             sendPacket(reply_data, reply_len, DD, neighbor->ip, neighbor->local_interface);
             uint32_t rxmt_data_id = intf->rxmtter.addRxmtData(
@@ -708,12 +739,14 @@ void receiveLSUPacket(char* packet_receive, in_addr_t source_ip, in_addr_t targe
     //LSU报文起始位置
     OSPFLSU* lsu = (OSPFLSU*)(packet_receive + IP_HEADER_LEN + OSPF_HEADER_LEN);
     int lsa_count = ntohl(lsu->LSA_num);//LSA数量
-
-    //指向LSU中第一个LSA的起始位置
-    char* lsu_lsa_pos = (char*)(lsu) + sizeof(OSPFLSU);
+    //TEST
+    printf("LSU has %d lsa.\n", lsa_count);
 
     char* lsack = (char*)malloc(1024);
     LSAHeader* lsack_header = (LSAHeader*)lsack;
+
+    //指向LSU中第一个LSA的起始位置
+    char* lsu_lsa_pos = (char*)(lsu) + sizeof(OSPFLSU);
 
     //循环处理每个LSA
     for (int i = 0; i < lsa_count; i++) {
@@ -739,11 +772,11 @@ void* sendEmptyDDPacket(void* neighborPtr) {
     Neighbor* neighbor = (Neighbor*)neighborPtr;
 
     //TEST 只发一次DD报文
-    int count = 0;
+    // int count = 0;
     while (true) {
-        if (count) {
-            break;
-        }
+        // if (count) {
+        //     break;
+        // }
         //如果邻居状态不是EXSTART(交换初始状态)
         if (neighbor->neighborState != NeighborState::EXSTART) {
             break;
@@ -761,7 +794,7 @@ void* sendEmptyDDPacket(void* neighborPtr) {
         sendPacket((char*)&dd, sizeof(dd), DD, neighbor->ip, neighbor->local_interface);
         printf("send empty DD packet success.\n");
         sleep(neighbor->local_interface->rxmt_interval);
-        count++;
+        // count++;
     }
 
     pthread_exit(NULL);

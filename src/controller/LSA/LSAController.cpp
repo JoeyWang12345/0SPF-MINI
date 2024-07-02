@@ -10,6 +10,8 @@ void generateRouterLSA() {
     printf("Generate a Router LSA.\n");
     //生成新的RouterLSA，利用配置中的接口信息
     LSARouter* lsa_router = genRouterLSA(WHYConfig::interfaces);
+    //TEST 打印新生成的LSA
+    lsa_router->print();
     //获取当前路由器的Router LSA
     LSARouter* lsa_check = lsdb.getRouterLSA(WHYConfig::router_id, WHYConfig::router_id);
     //标志是否插入到LSDB中
@@ -22,7 +24,7 @@ void generateRouterLSA() {
         pthread_mutex_unlock(&lsdb.router_lock);
     }
     //LSDB中存在，比较谁更新
-    else if (*lsa_router > * lsa_check) {
+    else if (*lsa_router > *lsa_check) {
         printf("newer Router LSA, insert into lsdb and delete the former.\n");
         lsdb.deleteLSA(ROUTER, lsa_check->lsaHeader.link_state_id, lsa_check->lsaHeader.advertising_router);
         pthread_mutex_lock(&lsdb.router_lock);
@@ -89,12 +91,12 @@ void generateNetworkLSA(Interface* interface) {
     LSANetwork* lsa_check = lsdb.getNetworkLSA(WHYConfig::router_id, interface->ip);
     bool flag = false;
     
-    if (!lsa_check) {
+    if (!lsa_check || !(*lsa_check == *lsa_network)) {
         printf("new Network LSA, insert into lsdb.\n");
         pthread_mutex_lock(&lsdb.network_lock);
         lsdb.lsa_networks.push_back(lsa_network);
         pthread_mutex_unlock(&lsdb.network_lock);
-        flag = true;
+        // flag = true;
     }
     else if (*lsa_network > *lsa_check) {
         printf("newer Network LSA, insert into lsdb and delete the former.\n");
@@ -123,6 +125,7 @@ LSANetwork* genNetworkLSA(Interface* interface) {
 
     //只有和DR达到完全临接(FULL)的路由器才被放入
     for (Neighbor* neighbor : interface->neighbors) {
+        //TEST 暂时注释
         if (neighbor->neighborState == NeighborState::FULL) {
             lsa_network->attached_routers.push_back(neighbor->ip);
         }

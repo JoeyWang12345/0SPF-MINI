@@ -17,8 +17,8 @@ Interface::~Interface() {
 
 void* wait(void* interface) {
     Interface* intf = (Interface*)interface;
-    sleep(400);
-    // sleep(12);
+    // sleep(40);
+    sleep(12);
     intf->waitTimerEvent();
 }
 
@@ -74,6 +74,9 @@ void Interface::waitTimerEvent() {
 //路由器已经探知网络上是否存在BDR，会结束等待状态
 void Interface::backupSeenEvent() {
     printf("Interface %x touched backupSeenEvent ", this->ip);
+    printf("=================================================================\n");
+    printf("=======================Backup Has Seen Event=====================\n");
+    printf("=================================================================\n");
     if (interfaceState == InterfaceState::WAITING) {
         //此时需要选举DR
         electDR();
@@ -101,7 +104,9 @@ void Interface::backupSeenEvent() {
 //邻居发生改变
 void Interface::neighborChangeEvent() {
     printf("Interface %x touched neighborChange ", this->ip);
-    
+    printf("\n=================================================================\n");
+    printf("=======================Neighbor Change Event=====================\n");
+    printf("=================================================================\n");
     //只有当接口状态为DR/BDR/DROTHER时才行
     if (interfaceState == InterfaceState::DR || interfaceState == InterfaceState::BDR || interfaceState == InterfaceState::DROTHER) {
         //重新选举DR
@@ -175,6 +180,9 @@ void Interface::electDR() {
     }
     //TEST
     printf("candidates's num: %d\n", candidates.size());
+    printf("local interface's id: %x.\n", self.id);
+    printf("local dr: %x.\n", self.designed_router);
+    printf("local bdr: %x.\n", self.backup_designed_router);
 
     //初始化DR和BDR
     Neighbor* dr = nullptr;
@@ -225,6 +233,9 @@ void Interface::electDR() {
     //检查当前接口是否成为了新的DR
     if (dr->ip == this->ip && this->designed_router != this->ip) {
         //更新网络拓扑信息
+        printf("=================================================================\n");
+        printf("=======================Generate Network LSA======================\n");
+        printf("=================================================================\n");
         generateNetworkLSA(this);
     }
 

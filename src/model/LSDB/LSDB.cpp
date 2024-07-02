@@ -149,3 +149,61 @@ void LSDB::floodLSA(LSA* lsa, std::vector<Interface*> interfaces) {
 
     free(lsu);
 }
+
+//将LSDB洪泛到指定的接口列表上
+void LSDB::floodLSDB(std::vector<Interface*> interfaces) {
+    char* lsu = (char*)malloc(2048);
+    OSPFLSU* lsu_body = (OSPFLSU*)lsu;
+    memset(lsu_body, 0, sizeof(OSPFLSU));
+    //计算LSA数目
+    printf("LSA's num: %d.\n", lsu_body->LSA_num);
+    lsu_body->LSA_num = htonl(lsa_routers.size() + lsa_networks.size());
+
+    char* lsu_lsa = lsu + sizeof(OSPFLSU);
+    char* lsa_packet;
+    for (LSARouter* lsa_router : lsa_routers) {
+        lsa_packet = ((LSARouter*)lsa_router)->toRouterLSA();
+        memcpy(lsu_lsa, lsa_packet, lsa_router->size());
+        lsu_lsa += lsa_router->size();
+    }
+    for (LSANetwork* lsa_network : lsa_networks) {
+        lsa_packet = ((LSANetwork*)lsa_network)->toNetworkLSA();
+        memcpy(lsu_lsa, lsa_packet, lsa_network->size());
+        lsu_lsa += lsa_network->size();
+    }
+    delete[] lsa_packet;
+
+    //发送LSU包
+    for (Interface* interface : interfaces) {
+        if (interface->interfaceState == InterfaceState::DROTHER
+        || interface->interfaceState == InterfaceState::BDR
+        || interface->interfaceState == InterfaceState::PTP) {
+            sendPacket(lsu, sizeof(OSPFLSU) + (lsu_lsa - lsu), LSU, ntohl(inet_addr("224.0.0.5")), interface);
+        }
+    }
+    free(lsu);
+}
+
+LSDB LSDB::deepClone() {
+    LSDB copy;
+    //复制lsa_routers
+    for (const auto& lsa_router : lsa_routers) {
+        copy.lsa_routers.push_back(new LSARouter(*lsa_router));
+    }
+    //复制network_routers
+    for (const auto& lsa_network : lsa_networks) {
+        copy.lsa_networks.push_back(new LSANetwork(*lsa_network));
+    }
+
+    return copy;
+}
+
+//打印本路由器的lsdb
+void LSDB::print() {
+    for (LSARouter* lsa_router : lsa_routers) {
+        lsa_router->print();
+    }
+    for (LSANetwork* lsa_network : lsa_networks) {
+        lsa_network->print();
+    }
+}

@@ -100,6 +100,9 @@ LSA::LSA() {
 
 //bigger: newer，比较两个LSA实例
 bool LSA::operator>(const LSA& other) {
+    //要求link_state_id和advertising_router相同
+    assert(lsaHeader.link_state_id == other.lsaHeader.link_state_id);
+    assert(lsaHeader.advertising_router == other.lsaHeader.advertising_router);
     //优先检查序列号
     if (this->lsaHeader.ls_sequence_number > other.lsaHeader.ls_sequence_number) {
         return true;
@@ -112,7 +115,8 @@ bool LSA::operator>(const LSA& other) {
  * LSA Router
  */
 LSARouter::LSARouter() {
-    lsaHeader = LSAHeader();
+    //LSARouter是继承自LSA，不需要额外声明
+    // lsaHeader = LSAHeader();
     lsaHeader.ls_type = 1;
     zero1  = 0;
     b_B = 0;
@@ -135,7 +139,7 @@ LSARouter::LSARouter(char* lsu_lsa_pos) {
     //填充RouterLink
     char* lsa_link = lsa_data + 4;
     for (int i = 0; i < link_num; i++) {
-        LSARouterLinks.push_back(LSARouterLink(lsa_link));
+        LSARouterLinks.emplace_back(LSARouterLink(lsa_link));
         lsa_link += sizeof(LSARouterLink);
     }
 }
@@ -183,6 +187,22 @@ size_t LSARouter::size() {
     return LSA_HEADER_LEN + 4 + LSARouterLinks.size() * sizeof(LSARouterLink);
 }
 
+bool LSARouter::operator==(const LSARouter& other) {
+    if (lsaHeader.link_state_id == other.lsaHeader.link_state_id
+    && lsaHeader.advertising_router == other.lsaHeader.advertising_router
+    && lsaHeader.ls_sequence_number == other.lsaHeader.ls_sequence_number) {
+        return true;
+    }
+    return false;
+}
+
+void LSARouter::print() {
+    lsaHeader.print();
+    for (LSARouterLink link : LSARouterLinks) {
+        link.print();
+    }
+}
+
 /*
  * LSA Router Link
  */
@@ -194,16 +214,34 @@ LSARouterLink::LSARouterLink() {
 LSARouterLink::LSARouterLink(char* lsa_link) {
     link_id = ntohl(*(uint32_t*)lsa_link);
     link_data = ntohl(*(uint32_t*)(lsa_link + 4));
-    type = ntohl(*(uint8_t*)(lsa_link + 8));
+    //看看你这写的是啥
+    // type = ntohl(*(uint8_t*)(lsa_link + 8));
+    type = *(lsa_link + 8);
     tos_num = 0;
     metric = ntohs(*(uint16_t*)(lsa_link + 10));
+}
+
+bool LSARouterLink::operator==(const LSARouterLink& other) {
+    if (link_id == other.link_id && link_data == other.link_data
+    && type == other.type && tos_num == other.tos_num && metric == other.metric) {
+        return true;
+    }
+    return false;
+}
+
+void LSARouterLink::print() {
+    printf("link_id: %x, ", link_id);
+    printf("link_data: %x, ", link_data);
+    printf("link_type: %d, ", type);
+    printf("metric: %x.\n", metric);
 }
 
 /*
  * LSA Network
  */
 LSANetwork::LSANetwork() {
-    lsaHeader = LSAHeader();
+    //这也一样啊，继承下来的！
+    // lsaHeader = LSAHeader();
     lsaHeader.ls_type = 2;
     //TODO 暂定是这样
     network_mask = 0xffffff00;
@@ -255,4 +293,32 @@ char* LSANetwork::toNetworkLSA() {
 size_t LSANetwork::size() {
     //TODO LSANetworkLink大小为什么是32？
     return LSA_HEADER_LEN + 4 + attached_routers.size() * sizeof(uint32_t);
+}
+
+//比较两个2类型LSA是否相同
+bool LSANetwork::operator==(const LSANetwork& other) {
+    if (lsaHeader.link_state_id != other.lsaHeader.link_state_id
+    || lsaHeader.advertising_router != other.lsaHeader.advertising_router
+    || lsaHeader.length != other.lsaHeader.length
+    || network_mask != other.network_mask
+    || attached_routers.size() != other.attached_routers.size()) {
+        return false;
+    }
+    for (int pos = 0; pos < attached_routers.size(); pos++) {
+        if (attached_routers[pos] != other.attached_routers[pos]) {
+            return false;
+        }
+    }   
+    return true;
+}
+
+void LSANetwork::print() {
+    lsaHeader.print();
+    printf("attached_router: ");
+    for (uint32_t router : attached_routers) {
+        in_addr temp;
+        temp.s_addr = htonl(router);
+        printf("%s, ", inet_ntoa(temp));
+    }
+    printf("\n");
 }

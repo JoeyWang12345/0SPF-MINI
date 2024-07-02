@@ -5,8 +5,8 @@
 #include <arpa/inet.h>
 
 namespace WHYConfig {
-    const char* local_name = "ens33";
-    uint32_t router_id = ntohl(inet_addr("192.168.206.4"));
+    // const char* local_name = "ens33";
+    uint32_t router_id = ntohl(inet_addr("40.1.1.2"));
     std::vector<Interface*> interfaces;
     std::map<uint32_t, Interface*> iptointerface;
 

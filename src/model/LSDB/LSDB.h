@@ -33,6 +33,15 @@ public:
     void addLSA(char* lsu_lsa_pos);
     void deleteLSA(uint8_t type, uint32_t link_state_id, uint32_t advertise_router_id);
     void floodLSA(LSA* lsa, std::vector<Interface*> interfaces);
+    
+    //洪泛整个lsdb
+    void floodLSDB(std::vector<Interface*> interfaces);
+    
+    //深克隆
+    LSDB deepClone();
+
+    //打印
+    void print();
 };
 
 extern LSDB lsdb;

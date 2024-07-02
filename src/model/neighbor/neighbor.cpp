@@ -38,6 +38,8 @@ Neighbor::~Neighbor() {
 //初始化邻居的数据库摘要列表
 void Neighbor::initDBSummaryList() {
     printf("Init db_summary_list.\n");
+    printf("LSDB's lsa_routers size: %d.\n", lsdb.lsa_routers.size());
+    printf("LSDB's lsa_networks size: %d.\n", lsdb.lsa_networks.size());
     //确保在访问时线程安全
     pthread_mutex_lock(&lsdb.router_lock);
     for (auto& lsa_router : lsdb.lsa_routers) {
@@ -100,7 +102,7 @@ void Neighbor::receive1WayEvent() {
 }
 
 //互相发送Hello后，进入2Way状态
-void Neighbor::receive2WayEvent() {
+void Neighbor::receive2WayEvent(Interface* intf) {
     printf("Neighbor %x touched receive2WayEvent ", this->id);
     if (neighborState == NeighborState::INIT) {
         //获取邻居所在接口及其网络类型
@@ -113,14 +115,17 @@ void Neighbor::receive2WayEvent() {
             case NetworkType::BROADCAST:
             case NetworkType::NBMA: {
                 //检查邻居和自己是否都不是DR或BDR
+                // printf("Neighbor's dr: %x.\n", this->designed_router);
+                // printf("Neighbor's bdr: %x.\n", this->backup_designed_router);
                 if (this->id != this->designed_router && this->id != this->backup_designed_router
                 && WHYConfig::router_id != this->designed_router
                 && WHYConfig::router_id != this->backup_designed_router) {
                     //将状态设为2WAY，不成临接关系
                     neighborState = NeighborState::TWO_WAY;
-                    printf("then change from INIT to 2-WAY");
+                    printf("then change from INIT to 2-WAY.\n");
                     break;
                 }
+                //最后没有break，会继续向下执行，称为fall through
             }
 
             default: {
@@ -157,12 +162,13 @@ void Neighbor::negotiationDoneEvent() {
 void Neighbor::seqNumberMismatchEvent() {
     printf("Neighbor %x touched SeqNumberMismatchEvent ", this->id);
     if (neighborState >= NeighborState::EXCHANGE) {
+        NeighborState prev_state = neighborState;
         //TODO 改变状态，清除列表，发送空DD报文
         neighborState = NeighborState::EXSTART;
-        lsr_list.clear();
-        db_summary_list.clear();
-        link_state_rxmt_list.clear();
-        sendEmptyDDPacket(this);
+        // lsr_list.clear();
+        // db_summary_list.clear();
+        // link_state_rxmt_list.clear();
+        // sendEmptyDDPacket(this);
         printf("then change from EXCHANGE to EXSTART.\n");
     }
     else {
@@ -182,8 +188,15 @@ void Neighbor::exchangeDoneEvent() {
             generateRouterLSA();
             //如果接口的DR是本接口的IP地址，生成网络LSA
             if (local_interface->designed_router == local_interface->ip) {
+                printf("=================================================================\n");
+                printf("=======================Generate Network LSA======================\n");
+                printf("=================================================================\n");
                 generateNetworkLSA(local_interface);
             }
+
+            //洪泛整个LSDB
+            printf("Flood LSDB.\n");
+            lsdb.floodLSDB(WHYConfig::interfaces);
         }
         //需要从邻居获取LSA，将邻居状态改为LOADING
         else {
@@ -201,12 +214,13 @@ void Neighbor::exchangeDoneEvent() {
 void Neighbor::badLSReqEvent() {
     printf("Neighbor %x touched badLSReqEvent ", this->id);
     if (neighborState >= NeighborState::EXCHANGE) {
+        NeighborState prev_state = neighborState;
         //TODO 改变状态，清除列表，发送空DD报文
         neighborState = NeighborState::EXSTART;
-        lsr_list.clear();
-        db_summary_list.clear();
-        link_state_rxmt_list.clear();
-        sendEmptyDDPacket(this);
+        // lsr_list.clear();
+        // db_summary_list.clear();
+        // link_state_rxmt_list.clear();
+        // sendEmptyDDPacket(this);
         printf("then change from EXCHANGE to EXSTART.\n");
     }
     else {
@@ -220,6 +234,12 @@ void Neighbor::loadDoneEvent() {
         neighborState = NeighborState::FULL;
         printf("then change from LOADING to FULL.\n");
         generateRouterLSA();
+
+        //洪泛LSAB
+        printf("Flood LSDB.\n");
+        lsdb.floodLSDB(WHYConfig::interfaces);
+        //TEST
+        lsdb.print();
 
         //TODO 这里应该需要更新路由表
         routing_table.update();
